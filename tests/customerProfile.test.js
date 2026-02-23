@@ -97,24 +97,19 @@ function buildDoc(payload) {
   };
 }
 
-// Deep-set a value at a dot-notation path (e.g. "basicOrg.displayName")
-function setDotPath(obj, path, value) {
-  const parts = path.split('.');
-  let cur = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (cur[parts[i]] === undefined) cur[parts[i]] = {};
-    cur = cur[parts[i]];
-  }
-  cur[parts[parts.length - 1]] = value;
-}
-
 // ─── Shared mock setup function (called once + re-called after clearAllMocks) ─
 function setupMocks() {
   CustomerProfile.mockImplementation(function (data) {
     const doc = buildDoc(data);
     Object.assign(this, doc);
-    // toJSON so Express's res.json() serialises the instance correctly
-    this.toJSON = function () { return buildDoc(data); };
+    // toJSON so Express's res.json() serialises the current instance state correctly
+    this.toJSON = function () {
+      const copy = {};
+      for (const k of Object.keys(this)) {
+        if (typeof this[k] !== 'function') copy[k] = this[k];
+      }
+      return copy;
+    };
     this.save = jest.fn().mockImplementation(async () => {
       if (store[this.tenantId]) {
         const err = new Error('duplicate key');
@@ -154,7 +149,25 @@ function setupMocks() {
       if (!doc) return null;
       const $set = update.$set || {};
       for (const [path, value] of Object.entries($set)) {
-        setDotPath(doc, path, value);
+        const dotIdx = path.indexOf('.');
+        if (dotIdx === -1) {
+          // Top-level section replacement (PUT): e.g. { basicOrg: { ... } }
+          if (Object.prototype.hasOwnProperty.call(doc, path)) {
+            doc[path] = value;
+          }
+        } else {
+          // Nested field update (PATCH): e.g. { "basicOrg.displayName": "..." }
+          // Only two levels deep; guard existing section objects.
+          const section = path.slice(0, dotIdx);
+          const field   = path.slice(dotIdx + 1);
+          if (
+            Object.prototype.hasOwnProperty.call(doc, section) &&
+            typeof doc[section] === 'object' &&
+            doc[section] !== null
+          ) {
+            doc[section][field] = value;
+          }
+        }
       }
       doc.security.auditLoggingEnabled = true; // invariant: always locked
       store[filter.tenantId] = doc;

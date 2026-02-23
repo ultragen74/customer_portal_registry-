@@ -2,14 +2,26 @@
 
 require('dotenv').config();
 
-const express  = require('express');
-const mongoose = require('mongoose');
+const express   = require('express');
+const mongoose  = require('mongoose');
+const rateLimit = require('express-rate-limit');
 
 const customerProfileRouter = require('./routes/customerProfile');
 
 const app = express();
 
 app.use(express.json());
+
+// ─── Rate limiting (100 requests per 15 minutes per IP) ──────────────────────
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+app.use('/api/', apiLimiter);
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/customers', customerProfileRouter);
